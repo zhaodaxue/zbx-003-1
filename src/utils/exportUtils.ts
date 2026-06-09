@@ -1,6 +1,6 @@
 import type { AppState, Assignment, CellShift, Conflict } from "@/types";
 import { SHIFT_LABEL } from "@/types";
-import { detectConflicts } from "./conflictUtils";
+import { detectConflicts, detectOutOfBounds } from "./conflictUtils";
 import {
   formatDateCompact,
   getDateDisplay,
@@ -10,13 +10,27 @@ import {
   parseDate,
 } from "./dateUtils";
 
-function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string {
+function buildScheduleTableHtml(
+  state: AppState,
+  conflicts: Conflict[],
+  outOfBounds: { cellKey: string; reason: string; assignmentId: string }[],
+): string {
   const weekDates = getWeekDates(state.currentWeekStart);
   const conflictMap = new Map<string, number>();
   conflicts.forEach((c) => {
     c.affectedCellKeys.forEach((key) => {
       conflictMap.set(key, (conflictMap.get(key) ?? 0) + 1);
     });
+  });
+
+  const oobMap = new Map<string, { count: number; assignmentIds: Set<string> }>();
+  outOfBounds.forEach((o) => {
+    if (!oobMap.has(o.cellKey)) {
+      oobMap.set(o.cellKey, { count: 0, assignmentIds: new Set() });
+    }
+    const entry = oobMap.get(o.cellKey)!;
+    entry.count += 1;
+    entry.assignmentIds.add(o.assignmentId);
   });
 
   let dateHeaderHtml = "";
@@ -53,6 +67,8 @@ function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string 
           (a) => a.volunteerId === volunteer.id && a.date === date && a.shift === shift,
         );
         const hasConflict = conflictMap.has(cellKey);
+        const oobEntry = oobMap.get(cellKey);
+        const hasOob = !!oobEntry && !hasConflict;
 
         let cellClass = "schedule-cell";
         let cellStyle = "";
@@ -63,6 +79,10 @@ function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string 
         if (hasConflict) {
           cellClass += " conflict";
           cellStyle = ' style="border:2px solid #d32f2f;background-color:#ffebee;"';
+        } else if (hasOob) {
+          cellClass += " outofbounds";
+          cellStyle =
+            ' style="border:2px solid #d97706;background-color:#fffbeb;background-image:repeating-linear-gradient(45deg,rgba(217,119,6,0.08),rgba(217,119,6,0.08) 6px,transparent 6px,transparent 12px);"';
         } else if (isWeekend(date) && !isUnavailable) {
           cellStyle = ' style="background-color:#fafafa;"';
         }
@@ -71,15 +91,22 @@ function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string 
         for (const a of cellAssignments) {
           const elderly = state.elderlyList.find((e) => e.id === a.elderlyId);
           if (elderly) {
-            tagHtml += `<span class="elderly-tag" title="${escapeHtml(elderly.name)}">${escapeHtml(elderly.shortName)}</span>`;
+            const isOobTag = oobEntry?.assignmentIds.has(a.id);
+            const tagStyle = isOobTag
+              ? ' style="background-color:#fef3c7;color:#78350f;border:1px solid #d97706;"'
+              : "";
+            tagHtml += `<span class="elderly-tag" title="${escapeHtml(elderly.name)}"${tagStyle}>${isOobTag ? "⚠️ " : ""}${escapeHtml(elderly.shortName)}</span>`;
           }
         }
 
         const conflictBadge = hasConflict
           ? '<span class="conflict-badge" title="存在冲突">⚠️</span>'
           : "";
+        const oobBadge = hasOob
+          ? '<span class="oob-badge" title="越界待处理">🟠</span>'
+          : "";
 
-        bodyHtml += `<td class="${cellClass}"${cellStyle}><div class="cell-content">${tagHtml}${conflictBadge}</div></td>`;
+        bodyHtml += `<td class="${cellClass}"${cellStyle}><div class="cell-content">${tagHtml}${conflictBadge}${oobBadge}</div></td>`;
       }
     }
 
@@ -123,8 +150,56 @@ function buildConflictSummaryHtml(conflicts: Conflict[]): string {
   });
 
   return `<div class="conflict-section">
-    <h3 class="conflict-title">⚠️ 冲突摘要（共${conflicts.length}项）</h3>
+    <h3 class="conflict-title">⚠️ 硬冲突摘要（共${conflicts.length}项）</h3>
     <ol class="conflict-list">${listHtml}</ol>
+  </div>`;
+}
+
+function buildOutOfBoundsSummaryHtml(
+  items: { cellKey: string; reason: string; assignmentId: string; description: string }[],
+  state: AppState,
+): string {
+  if (items.length === 0) {
+    return `<div class="no-oob">
+      <div class="check-icon">🟢</div>
+      <div class="no-oob-text">无越界待处理项</div>
+    </div>`;
+  }
+
+  const reasonLabels: Record<string, string> = {
+    DATE_UNAVAILABLE: "超出可服务日期",
+    SHIFT_UNAVAILABLE: "超出可服务时段",
+    OVER_CAPACITY: "超出陪诊上限",
+  };
+  const volunteerMap = new Map(state.volunteers.map((v) => [v.id, v.name]));
+  const elderlyMap = new Map(state.elderlyList.map((e) => [e.id, e.name]));
+  const formatDS = (d: string) => {
+    const dt = parseDate(d);
+    return `${dt.getMonth() + 1}/${dt.getDate()}`;
+  };
+
+  let listHtml = "";
+  items.forEach((item, i) => {
+    const assignment = state.assignments.find((a) => a.id === item.assignmentId);
+    const vName = volunteerMap.get(assignment?.volunteerId ?? "") ?? "未知";
+    const eName = elderlyMap.get(assignment?.elderlyId ?? "") ?? "未知老人";
+    const dateStr = assignment
+      ? `${formatDS(assignment.date)} ${assignment.shift === "morning" ? "上午" : "下午"}`
+      : "";
+    const typeLabel = reasonLabels[item.reason] ?? item.reason;
+    listHtml += `<li class="oob-item">
+      <span class="oob-index">${i + 1}.</span>
+      <span class="oob-type">[${typeLabel}]</span>
+      <span class="oob-desc">
+        <strong>${escapeHtml(vName)}</strong> · ${dateStr} · 老人：<strong>${escapeHtml(eName)}</strong> — ${escapeHtml(item.description)}
+      </span>
+    </li>`;
+  });
+
+  return `<div class="oob-section">
+    <h3 class="oob-title">🟠 越界待处理（共${items.length}项）</h3>
+    <p class="oob-subtitle">因编辑志愿者规则导致部分既有分配不符合新规则，请协调员手动移走或删除后消失</p>
+    <ol class="oob-list">${listHtml}</ol>
   </div>`;
 }
 
@@ -135,20 +210,23 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   const filename = `陪诊排班表_${startCompact}-${endCompact}.html`;
   const weekRange = getWeekRangeStr(state.currentWeekStart);
 
-  const conflicts = detectConflicts(state.assignments, state.volunteers);
-  const weekConflictCount = conflicts.filter((c) => {
-    const assignment = state.assignments.find((a) => c.relatedAssignmentIds.includes(a.id));
-    return assignment ? weekDates.includes(assignment.date) : true;
-  });
   const weekAssignments = state.assignments.filter((a) => weekDates.includes(a.date));
   const weekState: AppState = {
     ...state,
     assignments: weekAssignments,
   };
   const weekConflicts = detectConflicts(weekState.assignments, weekState.volunteers);
+  const weekOutOfBoundsRaw = detectOutOfBounds(weekState.assignments, weekState.volunteers);
+  const weekOutOfBounds = weekOutOfBoundsRaw.map((o) => ({
+    cellKey: o.cellKey,
+    reason: o.reason,
+    assignmentId: o.assignmentId,
+    description: o.description,
+  }));
 
-  const tableHtml = buildScheduleTableHtml(weekState, weekConflicts);
-  const summaryHtml = buildConflictSummaryHtml(weekConflicts);
+  const tableHtml = buildScheduleTableHtml(weekState, weekConflicts, weekOutOfBounds);
+  const conflictSummaryHtml = buildConflictSummaryHtml(weekConflicts);
+  const oobSummaryHtml = buildOutOfBoundsSummaryHtml(weekOutOfBounds, weekState);
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -215,6 +293,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   .volunteer-meta { font-size: 13px; color: #888; }
   .schedule-cell { min-height: 60px; position: relative; }
   .schedule-cell.unavailable { background-color: #eeeeee; }
+  .schedule-cell.outofbounds { background-color: #fffbeb; }
   .cell-content { min-height: 44px; }
   .elderly-tag {
     display: inline-block;
@@ -230,6 +309,12 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     position: absolute;
     top: 2px;
     right: 2px;
+    font-size: 11px;
+  }
+  .oob-badge {
+    position: absolute;
+    top: 2px;
+    right: 20px;
     font-size: 11px;
   }
   .empty-hint {
@@ -280,6 +365,53 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     font-weight: 700;
     color: #2e7d32;
   }
+  .oob-section {
+    margin-top: 20px;
+    padding: 16px 20px;
+    background-color: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    page-break-inside: avoid;
+  }
+  .oob-title {
+    margin: 0 0 6px 0;
+    font-size: 18px;
+    color: #92400e;
+  }
+  .oob-subtitle {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    color: #78350f;
+  }
+  .oob-list {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+  }
+  .oob-item {
+    padding: 6px 0;
+    border-bottom: 1px dashed #fcd34d;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .oob-item:last-child { border-bottom: none; }
+  .oob-index { color: #92400e; margin-right: 4px; }
+  .oob-type { color: #b45309; font-weight: 700; margin-right: 6px; }
+  .oob-desc { color: #451a03; }
+  .no-oob {
+    margin-top: 20px;
+    padding: 16px;
+    background-color: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .no-oob-text {
+    font-size: 16px;
+    font-weight: 700;
+    color: #166534;
+  }
   .print-footer {
     margin-top: 32px;
     padding-top: 16px;
@@ -291,7 +423,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   @media print {
     body { padding: 0; }
     .print-header { margin-bottom: 12px; }
-    .conflict-section, .no-conflict { margin-top: 20px; }
+    .conflict-section, .no-conflict, .oob-section, .no-oob { margin-top: 20px; }
   }
 </style>
 </head>
@@ -301,7 +433,8 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     <p class="print-subtitle">📅 ${weekRange}</p>
   </div>
   ${tableHtml}
-  ${summaryHtml}
+  ${conflictSummaryHtml}
+  ${oobSummaryHtml}
   <div class="print-footer">
     导出时间：${new Date().toLocaleString("zh-CN")}
   </div>
@@ -329,5 +462,4 @@ function escapeHtml(str: string): string {
   return div.innerHTML;
 }
 
-// re-export SHIFT_LABEL for consistency
 export { SHIFT_LABEL };

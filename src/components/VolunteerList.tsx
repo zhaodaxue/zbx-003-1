@@ -1,13 +1,18 @@
-import { Trash2, Users, CalendarCheck } from "lucide-react";
+import { useState } from "react";
+import { Trash2, Users, CalendarCheck, Edit3 } from "lucide-react";
 import type { Volunteer } from "@/types";
 import { SHIFT_FULL_LABEL } from "@/types";
 import { useScheduleStore } from "@/store/useScheduleStore";
 import { parseDate } from "@/utils/dateUtils";
+import EditVolunteerModal from "./EditVolunteerModal";
 
 export default function VolunteerList() {
   const volunteers = useScheduleStore((s) => s.volunteers);
   const assignments = useScheduleStore((s) => s.assignments);
   const dispatch = useScheduleStore((s) => s.dispatch);
+
+  const [editingVolunteer, setEditingVolunteer] = useState<Volunteer | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const getAssignmentCount = (vid: string): number => {
     return assignments.filter((a) => a.volunteerId === vid).length;
@@ -36,6 +41,11 @@ export default function VolunteerList() {
     if (window.confirm(msg)) {
       dispatch({ type: "REMOVE_VOLUNTEER", payload: v.id });
     }
+  };
+
+  const handleEdit = (v: Volunteer) => {
+    setEditingVolunteer(v);
+    setModalOpen(true);
   };
 
   return (
@@ -99,21 +109,38 @@ export default function VolunteerList() {
                     )}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleRemove(v)}
-                    className="btn-danger-sm opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                    aria-label={`删除${v.name}`}
-                    title="删除志愿者"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+                  <div className="flex flex-col gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(v)}
+                      className="btn-danger-sm opacity-0 group-hover:opacity-100 transition-opacity text-medical-blue hover:bg-medical-blue-light p-2 rounded-md"
+                      aria-label={`编辑${v.name}`}
+                      title="编辑志愿者"
+                    >
+                      <Edit3 className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(v)}
+                      className="btn-danger-sm opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      aria-label={`删除${v.name}`}
+                      title="删除志愿者"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <EditVolunteerModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        volunteer={editingVolunteer}
+      />
     </div>
   );
 }

@@ -7,6 +7,11 @@ export type ConflictType =
   | "ELDERLY_DOUBLE_BOOKED"
   | "VOLUNTEER_OVER_CAPACITY";
 
+export type OutOfBoundsReason =
+  | "DATE_UNAVAILABLE"
+  | "SHIFT_UNAVAILABLE"
+  | "OVER_CAPACITY";
+
 export interface Volunteer {
   id: string;
   name: string;
@@ -37,6 +42,15 @@ export interface Conflict {
   affectedCellKeys: string[];
 }
 
+export interface OutOfBoundsItem {
+  id: string;
+  assignmentId: string;
+  volunteerId: string;
+  reason: OutOfBoundsReason;
+  description: string;
+  cellKey: string;
+}
+
 export interface AppState {
   volunteers: Volunteer[];
   elderlyList: Elderly[];
@@ -47,6 +61,7 @@ export interface AppState {
 export type Action =
   | { type: "ADD_VOLUNTEER"; payload: Omit<Volunteer, "id"> }
   | { type: "REMOVE_VOLUNTEER"; payload: string }
+  | { type: "EDIT_VOLUNTEER"; payload: Volunteer }
   | { type: "ADD_ELDERLY"; payload: Omit<Elderly, "id" | "shortName"> }
   | {
       type: "ADD_ASSIGNMENT";
@@ -85,6 +100,12 @@ export const CONFLICT_LABEL: Record<ConflictType, string> = {
   VOLUNTEER_DOUBLE_SHIFT: "志愿者同时段重复",
   ELDERLY_DOUBLE_BOOKED: "老人同日重复登记",
   VOLUNTEER_OVER_CAPACITY: "志愿者陪诊人数超上限",
+};
+
+export const OUT_OF_BOUNDS_LABEL: Record<OutOfBoundsReason, string> = {
+  DATE_UNAVAILABLE: "超出可服务日期",
+  SHIFT_UNAVAILABLE: "超出可服务时段",
+  OVER_CAPACITY: "超出陪诊上限",
 };
 
 export const WEEKDAY_LABEL = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];

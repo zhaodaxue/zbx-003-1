@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { X, UserRoundPlus } from "lucide-react";
-import type { CellShift } from "@/types";
+import { useEffect, useMemo, useState } from "react";
+import { X, UserRoundPlus, AlertOctagon } from "lucide-react";
+import type { CellShift, Elderly } from "@/types";
 import { SHIFT_LABEL } from "@/types";
 import { useScheduleStore } from "@/store/useScheduleStore";
 import { parseDate } from "@/utils/dateUtils";
+import { validateAddAssignment } from "@/utils/conflictUtils";
 
 interface Props {
   open: boolean;
@@ -24,9 +25,26 @@ export default function AddElderlyModal({
 }: Props) {
   const dispatch = useScheduleStore((s) => s.dispatch);
   const elderlyList = useScheduleStore((s) => s.elderlyList);
+  const assignments = useScheduleStore((s) => s.assignments);
+  const volunteers = useScheduleStore((s) => s.volunteers);
+  const currentWeekStart = useScheduleStore((s) => s.currentWeekStart);
 
   const [elderlyName, setElderlyName] = useState("");
   const [error, setError] = useState("");
+
+  const weekAssignments = useMemo(() => {
+    const startD = parseDate(currentWeekStart);
+    const weekDateSet = new Set<string>();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startD);
+      d.setDate(startD.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      weekDateSet.add(`${y}-${m}-${dd}`);
+    }
+    return assignments.filter((a) => weekDateSet.has(a.date));
+  }, [assignments, currentWeekStart]);
 
   useEffect(() => {
     if (open) {
@@ -39,6 +57,10 @@ export default function AddElderlyModal({
     if (e.key === "Escape") onClose();
   };
 
+  const findExistingElderly = (name: string): Elderly | undefined => {
+    return elderlyList.find((e) => e.name.trim() === name.trim());
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = elderlyName.trim();
@@ -48,6 +70,24 @@ export default function AddElderlyModal({
     }
     if (trimmed.length > 10) {
       setError("姓名过长，请输入10字以内");
+      return;
+    }
+
+    const existing = findExistingElderly(trimmed);
+    const tempElderlyId = existing ? existing.id : `temp_new_${Date.now()}`;
+
+    const validation = validateAddAssignment(
+      weekAssignments,
+      volunteers,
+      volunteerId,
+      tempElderlyId,
+      date,
+      shift,
+      trimmed,
+    );
+
+    if (!validation.valid) {
+      setError(validation.reasons.join("；\n"));
       return;
     }
 
@@ -66,6 +106,7 @@ export default function AddElderlyModal({
 
   const selectExisting = (name: string) => {
     setElderlyName(name);
+    if (error) setError("");
   };
 
   if (!open) return null;
@@ -120,7 +161,16 @@ export default function AddElderlyModal({
               autoFocus
               maxLength={10}
             />
-            {error && <p className="text-sm text-red-500 mt-1.5">{error}</p>}
+            {error && (
+              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertOctagon className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-red-600 text-xs whitespace-pre-line leading-relaxed">
+                    {error}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {elderlyList.length > 0 && (

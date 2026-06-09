@@ -1,9 +1,16 @@
 import { useMemo, useState } from "react";
-import { Users } from "lucide-react";
+import { Users, AlertOctagon } from "lucide-react";
 import type { Assignment, CellShift, Elderly, Volunteer } from "@/types";
 import { useScheduleStore } from "@/store/useScheduleStore";
 import { getWeekDates, isWeekend, parseDate } from "@/utils/dateUtils";
-import { buildConflictCellMap, detectConflicts } from "@/utils/conflictUtils";
+import {
+  buildConflictCellMap,
+  buildOutOfBoundsCellMap,
+  detectConflicts,
+  detectOutOfBounds,
+  isVolunteerAvailable,
+  validateMoveAssignment,
+} from "@/utils/conflictUtils";
 import ScheduleCell from "./ScheduleCell";
 import AddElderlyModal from "./AddElderlyModal";
 
@@ -36,6 +43,10 @@ export default function ScheduleGrid() {
   const [modal, setModal] = useState<ModalState>(EMPTY_MODAL);
   const [draggingAssignmentId, setDraggingAssignmentId] = useState<string | null>(null);
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
+  const [blockedToast, setBlockedToast] = useState<{ show: boolean; msg: string }>({
+    show: false,
+    msg: "",
+  });
 
   const weekDates = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart]);
 
@@ -60,6 +71,16 @@ export default function ScheduleGrid() {
     [conflicts],
   );
 
+  const outOfBounds = useMemo(
+    () => detectOutOfBounds(weekAssignments, volunteers),
+    [weekAssignments, volunteers],
+  );
+
+  const outOfBoundsCellMap = useMemo(
+    () => buildOutOfBoundsCellMap(outOfBounds),
+    [outOfBounds],
+  );
+
   const assignmentCellMap = useMemo(() => {
     const map = new Map<string, Assignment[]>();
     for (const a of weekAssignments) {
@@ -70,7 +91,23 @@ export default function ScheduleGrid() {
     return map;
   }, [weekAssignments]);
 
+  const showBlockedMessage = (reasons: string[]) => {
+    setBlockedToast({ show: true, msg: reasons.join("\n") });
+    setTimeout(() => setBlockedToast({ show: false, msg: "" }), 3500);
+  };
+
   const handleCellClick = (v: Volunteer, date: string, shift: CellShift) => {
+    if (!isVolunteerAvailable(v, date, shift)) {
+      const targetDay = parseDate(date).getDay();
+      const dateAvailable = v.availableDates.some(
+        (d) => parseDate(d).getDay() === targetDay,
+      );
+      const reason = !dateAvailable
+        ? `志愿者「${v.name}」在${date}非可服务日期，无法分配`
+        : `志愿者「${v.name}」在${date}${shift === "morning" ? "上午" : "下午"}非可服务时段，无法分配`;
+      showBlockedMessage([reason]);
+      return;
+    }
     setModal({
       open: true,
       volunteerId: v.id,
@@ -78,17 +115,6 @@ export default function ScheduleGrid() {
       date,
       shift,
     });
-  };
-
-  const isVolunteerAvailable = (v: Volunteer, date: string, shift: CellShift): boolean => {
-    const targetDay = parseDate(date).getDay();
-    const dateAvailable = v.availableDates.some(
-      (d) => parseDate(d).getDay() === targetDay,
-    );
-    if (!dateAvailable) return false;
-    return (
-      v.availableShifts.includes("all") || v.availableShifts.includes(shift)
-    );
   };
 
   const handleDragStart = (e: React.DragEvent, assignmentId: string) => {
@@ -124,27 +150,59 @@ export default function ScheduleGrid() {
   ) => {
     e.preventDefault();
     const assignmentId = e.dataTransfer.getData("text/plain");
-    if (!assignmentId || assignmentId === draggingAssignmentId) {
-      const realId = assignmentId || draggingAssignmentId;
-      if (realId) {
-        dispatch({
-          type: "MOVE_ASSIGNMENT",
-          payload: {
-            assignmentId: realId,
-            newVolunteerId,
-            newDate,
-            newShift,
-          },
-        });
+    const realId = assignmentId || draggingAssignmentId;
+
+    if (!realId) {
+      setDraggingAssignmentId(null);
+      setDropTargetKey(null);
+      return;
+    }
+
+    const movingAssignment = assignments.find((a) => a.id === realId);
+    if (movingAssignment) {
+      if (
+        movingAssignment.volunteerId === newVolunteerId &&
+        movingAssignment.date === newDate &&
+        movingAssignment.shift === newShift
+      ) {
+        setDraggingAssignmentId(null);
+        setDropTargetKey(null);
+        return;
       }
     }
+
+    const validation = validateMoveAssignment(
+      weekAssignments,
+      volunteers,
+      realId,
+      newVolunteerId,
+      newDate,
+      newShift,
+    );
+
+    if (!validation.valid) {
+      showBlockedMessage(validation.reasons);
+      setDraggingAssignmentId(null);
+      setDropTargetKey(null);
+      return;
+    }
+
+    dispatch({
+      type: "MOVE_ASSIGNMENT",
+      payload: {
+        assignmentId: realId,
+        newVolunteerId,
+        newDate,
+        newShift,
+      },
+    });
     setDraggingAssignmentId(null);
     setDropTargetKey(null);
   };
 
   if (volunteers.length === 0) {
     return (
-      <div className="card p-12 text-center">
+      <div className="card p-12 text-center relative">
         <Users className="w-16 h-16 mx-auto mb-4 text-gray-300" />
         <h3 className="text-xl font-bold text-gray-600 mb-2">暂无志愿者</h3>
         <p className="text-gray-400 mb-6">
@@ -170,13 +228,17 @@ export default function ScheduleGrid() {
             在右侧网格分配老人
           </div>
         </div>
+
+        {blockedToast.show && (
+          <BlockedToast msg={blockedToast.msg} onClose={() => setBlockedToast({ show: false, msg: "" })} />
+        )}
       </div>
     );
   }
 
   return (
     <>
-      <div className="card overflow-hidden rounded-b-xl">
+      <div className="card overflow-hidden rounded-b-xl relative">
         <div className="overflow-x-auto scrollbar-thin">
           <div
             className="grid"
@@ -190,6 +252,7 @@ export default function ScheduleGrid() {
                   const cellKey = getCellKey(volunteer.id, date, shift);
                   const cellAssignments = assignmentCellMap.get(cellKey) ?? [];
                   const cellConflicts = conflictCellMap.get(cellKey) ?? [];
+                  const cellOutOfBounds = outOfBoundsCellMap.get(cellKey) ?? [];
                   const unavailable = !isVolunteerAvailable(volunteer, date, shift);
 
                   dayCells.push(
@@ -201,6 +264,7 @@ export default function ScheduleGrid() {
                       cellAssignments={cellAssignments}
                       elderlyMap={elderlyMap}
                       conflicts={cellConflicts}
+                      outOfBoundsItems={cellOutOfBounds}
                       isUnavailable={unavailable}
                       isWeekend={weekend}
                       isDropTarget={dropTargetKey === cellKey}
@@ -240,6 +304,10 @@ export default function ScheduleGrid() {
             })}
           </div>
         </div>
+
+        {blockedToast.show && (
+          <BlockedToast msg={blockedToast.msg} onClose={() => setBlockedToast({ show: false, msg: "" })} />
+        )}
       </div>
 
       <AddElderlyModal
@@ -251,5 +319,30 @@ export default function ScheduleGrid() {
         shift={modal.shift}
       />
     </>
+  );
+}
+
+function BlockedToast({ msg, onClose }: { msg: string; onClose: () => void }) {
+  return (
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 animate-in">
+      <div className="bg-red-50 border-2 border-red-200 rounded-xl shadow-lg px-5 py-4 max-w-lg">
+        <div className="flex items-start gap-3">
+          <AlertOctagon className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-bold text-red-700 text-sm mb-1">❌ 操作被拦截</div>
+            <div className="text-red-600 text-xs whitespace-pre-line leading-relaxed">
+              {msg}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-red-400 hover:text-red-600 text-sm ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

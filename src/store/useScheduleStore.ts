@@ -33,6 +33,15 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
 
+    case "EDIT_VOLUNTEER": {
+      return {
+        ...state,
+        volunteers: state.volunteers.map((v) =>
+          v.id === action.payload.id ? action.payload : v,
+        ),
+      };
+    }
+
     case "ADD_ELDERLY": {
       const existing = state.elderlyList.find(
         (e) => e.name.trim() === action.payload.name.trim(),

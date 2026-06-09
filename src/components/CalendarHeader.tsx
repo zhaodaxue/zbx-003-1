@@ -81,6 +81,10 @@ export default function CalendarHeader() {
             <span className="w-3 h-3 rounded-sm bg-schedule-conflict-bg border-2 border-schedule-conflict-border" />
             <span>有冲突</span>
           </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm border-2 bg-amber-50" style={{ borderColor: "#d97706" }} />
+            <span>越界待处理</span>
+          </div>
         </div>
       </div>
 

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { X, AlertTriangle } from "lucide-react";
-import type { Assignment, CellShift, Conflict, Elderly, Volunteer } from "@/types";
+import { X, AlertTriangle, AlertCircle } from "lucide-react";
+import type { Assignment, CellShift, Conflict, Elderly, OutOfBoundsItem, Volunteer } from "@/types";
 import { useScheduleStore } from "@/store/useScheduleStore";
-import { getConflictTypeLabel } from "@/utils/conflictUtils";
+import { getConflictTypeLabel, getOutOfBoundsReasonLabel } from "@/utils/conflictUtils";
 
 interface Props {
   volunteer: Volunteer;
@@ -11,6 +11,7 @@ interface Props {
   cellAssignments: Assignment[];
   elderlyMap: Map<string, Elderly>;
   conflicts: Conflict[];
+  outOfBoundsItems: OutOfBoundsItem[];
   isUnavailable: boolean;
   isWeekend: boolean;
   isDropTarget: boolean;
@@ -30,6 +31,7 @@ export default function ScheduleCell({
   cellAssignments,
   elderlyMap,
   conflicts,
+  outOfBoundsItems,
   isUnavailable,
   isWeekend,
   isDropTarget,
@@ -42,10 +44,12 @@ export default function ScheduleCell({
   draggingAssignmentId,
 }: Props) {
   const dispatch = useScheduleStore((s) => s.dispatch);
-  const [showTooltip, setShowTooltip] = useState(false);
+  const [showConflictTooltip, setShowConflictTooltip] = useState(false);
+  const [showOobTooltip, setShowOobTooltip] = useState(false);
   const [hoveredAssignmentId, setHoveredAssignmentId] = useState<string | null>(null);
 
   const hasConflict = conflicts.length > 0;
+  const hasOutOfBounds = outOfBoundsItems.length > 0;
 
   const handleRemoveAssignment = (e: React.MouseEvent, assignmentId: string, elderlyName: string) => {
     e.stopPropagation();
@@ -63,8 +67,9 @@ export default function ScheduleCell({
     "cell-base relative group",
     isUnavailable ? "cell-unavailable" : "cursor-pointer hover:border-medical-blue/40",
     hasConflict ? "cell-conflict" : "",
+    !hasConflict && hasOutOfBounds ? "cell-out-of-bounds" : "",
     isDropTarget ? "drop-target-active" : "",
-    isWeekend && !hasConflict && !isDropTarget ? "bg-schedule-weekend" : "",
+    isWeekend && !hasConflict && !hasOutOfBounds && !isDropTarget ? "bg-schedule-weekend" : "",
   ].join(" ");
 
   return (
@@ -78,11 +83,11 @@ export default function ScheduleCell({
       {hasConflict && (
         <div
           className="absolute top-1 right-1 z-10"
-          onMouseEnter={() => setShowTooltip(true)}
-          onMouseLeave={() => setShowTooltip(false)}
+          onMouseEnter={() => setShowConflictTooltip(true)}
+          onMouseLeave={() => setShowConflictTooltip(false)}
         >
           <AlertTriangle className="w-4 h-4 text-schedule-conflict-text fill-red-100" />
-          {showTooltip && (
+          {showConflictTooltip && (
             <div className="tooltip right-0 -top-2 translate-y-[-100%] w-60">
               <div className="font-bold text-red-200 mb-1.5">⚠️ 冲突提醒</div>
               <div className="space-y-1">
@@ -101,6 +106,32 @@ export default function ScheduleCell({
         </div>
       )}
 
+      {!hasConflict && hasOutOfBounds && (
+        <div
+          className="absolute top-1 right-1 z-10"
+          onMouseEnter={() => setShowOobTooltip(true)}
+          onMouseLeave={() => setShowOobTooltip(false)}
+        >
+          <AlertCircle className="w-4 h-4 text-amber-600 fill-amber-100" />
+          {showOobTooltip && (
+            <div className="tooltip right-0 -top-2 translate-y-[-100%] w-60" style={{ backgroundColor: "#78350f" }}>
+              <div className="font-bold text-amber-200 mb-1.5">🟠 越界待处理</div>
+              <div className="space-y-1">
+                {outOfBoundsItems.map((item) => (
+                  <div key={item.id} className="text-xs">
+                    <span className="text-amber-300 font-medium">
+                      [{getOutOfBoundsReasonLabel(item.reason)}]
+                    </span>
+                    <span className="ml-1 text-amber-100">{item.description}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="absolute -bottom-1.5 right-3 w-3 h-3 rotate-45" style={{ backgroundColor: "#78350f" }} />
+            </div>
+          )}
+        </div>
+      )}
+
       {isUnavailable ? (
         <div className="flex items-center justify-center h-full text-xs text-gray-400 italic">
           不可服务
@@ -112,10 +143,13 @@ export default function ScheduleCell({
               const elderly = elderlyMap.get(assignment.elderlyId);
               if (!elderly) return null;
               const isDragging = draggingAssignmentId === assignment.id;
+              const isAssignmentOob = outOfBoundsItems.some(
+                (o) => o.assignmentId === assignment.id,
+              );
               return (
                 <div
                   key={assignment.id}
-                  className={`elderly-tag group/tag relative justify-between ${isDragging ? "dragging" : ""}`}
+                  className={`elderly-tag group/tag relative justify-between ${isDragging ? "dragging" : ""} ${isAssignmentOob ? "border-amber-500 bg-amber-100 text-amber-900" : ""}`}
                   draggable
                   onDragStart={(e) => {
                     e.stopPropagation();
@@ -127,9 +161,11 @@ export default function ScheduleCell({
                   }}
                   onMouseEnter={() => setHoveredAssignmentId(assignment.id)}
                   onMouseLeave={() => setHoveredAssignmentId(null)}
-                  title={`${elderly.name} - 点击拖动可调整分配`}
+                  title={`${elderly.name} - 点击拖动可调整分配${isAssignmentOob ? "（当前越界待处理）" : ""}`}
                 >
-                  <span className="truncate">👴 {elderly.shortName}</span>
+                  <span className="truncate">
+                    {isAssignmentOob ? "⚠️" : "👴"} {elderly.shortName}
+                  </span>
                   <button
                     type="button"
                     onClick={(e) => handleRemoveAssignment(e, assignment.id, elderly.name)}
