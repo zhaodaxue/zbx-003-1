@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Users } from "lucide-react";
 import type { Assignment, CellShift, Elderly, Volunteer } from "@/types";
 import { useScheduleStore } from "@/store/useScheduleStore";
-import { getWeekDates, isWeekend } from "@/utils/dateUtils";
+import { getWeekDates, isWeekend, parseDate } from "@/utils/dateUtils";
 import { buildConflictCellMap, detectConflicts } from "@/utils/conflictUtils";
 import ScheduleCell from "./ScheduleCell";
 import AddElderlyModal from "./AddElderlyModal";
@@ -81,7 +81,10 @@ export default function ScheduleGrid() {
   };
 
   const isVolunteerAvailable = (v: Volunteer, date: string, shift: CellShift): boolean => {
-    const dateAvailable = v.availableDates.includes(date);
+    const targetDay = parseDate(date).getDay();
+    const dateAvailable = v.availableDates.some(
+      (d) => parseDate(d).getDay() === targetDay,
+    );
     if (!dateAvailable) return false;
     return (
       v.availableShifts.includes("all") || v.availableShifts.includes(shift)

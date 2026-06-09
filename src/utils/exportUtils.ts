@@ -7,6 +7,7 @@ import {
   getWeekDates,
   getWeekRangeStr,
   isWeekend,
+  parseDate,
 } from "./dateUtils";
 
 function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string {
@@ -25,7 +26,7 @@ function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string 
     dateHeaderHtml += `<th colspan="2" class="date-header"${weekendClass}><div class="weekday">${display.weekday}</div><div class="md-date">${display.month}月${display.day}日</div></th>`;
   });
 
-  let shiftHeaderHtml = '<th class="volunteer-col">志愿者</th>';
+  let shiftHeaderHtml = "";
   weekDates.forEach((date) => {
     const weekendClass = isWeekend(date) ? ' style="background-color:#f5f5f5;"' : "";
     shiftHeaderHtml += `<th class="shift-header"${weekendClass}>上午</th><th class="shift-header"${weekendClass}>下午</th>`;
@@ -36,7 +37,10 @@ function buildScheduleTableHtml(state: AppState, conflicts: Conflict[]): string 
     bodyHtml += `<tr class="volunteer-row"><td class="volunteer-cell"><div class="volunteer-name">${escapeHtml(volunteer.name)}</div><div class="volunteer-meta">上限${volunteer.maxElderly}人</div></td>`;
 
     for (const date of weekDates) {
-      const isAvailableDate = volunteer.availableDates.includes(date);
+      const targetDay = parseDate(date).getDay();
+      const isAvailableDate = volunteer.availableDates.some(
+        (d) => parseDate(d).getDay() === targetDay,
+      );
 
       for (const shift of ["morning", "afternoon"] as CellShift[]) {
         const shiftAvailable =
@@ -159,7 +163,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     margin: 0;
     padding: 24px;
     color: #212121;
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.5;
     background: #fff;
   }
@@ -170,13 +174,13 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     border-bottom: 2px solid #1e88e5;
   }
   .print-title {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 700;
     color: #1565c0;
     margin: 0 0 8px 0;
   }
   .print-subtitle {
-    font-size: 16px;
+    font-size: 18px;
     color: #666;
     margin: 0;
   }
@@ -188,7 +192,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   }
   .schedule-table th, .schedule-table td {
     border: 1px solid #e0e0e0;
-    padding: 8px;
+    padding: 10px;
     vertical-align: top;
     text-align: center;
     word-wrap: break-word;
@@ -199,16 +203,16 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     color: #1565c0;
   }
   .volunteer-col { width: 120px; }
-  .date-header .weekday { font-size: 14px; font-weight: 700; }
-  .date-header .md-date { font-size: 12px; color: #666; margin-top: 2px; }
-  .shift-header { font-size: 12px; padding: 4px 8px; color: #555; }
+  .date-header .weekday { font-size: 16px; font-weight: 700; }
+  .date-header .md-date { font-size: 14px; color: #666; margin-top: 2px; }
+  .shift-header { font-size: 14px; padding: 6px 8px; color: #555; }
   .volunteer-row { page-break-inside: avoid; }
   .volunteer-cell {
     text-align: left;
     background-color: #fafafa;
   }
-  .volunteer-name { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
-  .volunteer-meta { font-size: 12px; color: #888; }
+  .volunteer-name { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .volunteer-meta { font-size: 13px; color: #888; }
   .schedule-cell { min-height: 60px; position: relative; }
   .schedule-cell.unavailable { background-color: #eeeeee; }
   .cell-content { min-height: 44px; }
@@ -216,9 +220,9 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     display: inline-block;
     background-color: #e3f2fd;
     color: #1565c0;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 9999px;
-    font-size: 12px;
+    font-size: 13px;
     margin: 2px;
     border: 1px solid rgba(30,136,229,0.3);
   }
@@ -226,12 +230,12 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     position: absolute;
     top: 2px;
     right: 2px;
-    font-size: 10px;
+    font-size: 11px;
   }
   .empty-hint {
     padding: 40px;
     color: #999;
-    font-size: 16px;
+    font-size: 18px;
   }
   .conflict-section {
     margin-top: 28px;
@@ -243,7 +247,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   }
   .conflict-title {
     margin: 0 0 12px 0;
-    font-size: 16px;
+    font-size: 18px;
     color: #d32f2f;
   }
   .conflict-list {
@@ -254,7 +258,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   .conflict-item {
     padding: 6px 0;
     border-bottom: 1px dashed #ffcdd2;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.6;
   }
   .conflict-item:last-child { border-bottom: none; }
@@ -272,7 +276,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
   }
   .check-icon { font-size: 32px; margin-bottom: 8px; }
   .no-conflict-text {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
     color: #2e7d32;
   }
@@ -280,7 +284,7 @@ export function generatePrintableHtml(state: AppState): { filename: string; html
     margin-top: 32px;
     padding-top: 16px;
     border-top: 1px solid #e0e0e0;
-    font-size: 12px;
+    font-size: 13px;
     color: #999;
     text-align: right;
   }
